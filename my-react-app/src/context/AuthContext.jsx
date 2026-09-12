@@ -80,6 +80,43 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // 2.1 ฟังก์ชันล็อกอินด้วย Email & Password (เฉพาะ @up.ac.th)
+  const loginWithEmail = async (email, password) => {
+    try {
+      setIsLoggingIn(true);
+      setAuthError("");
+
+      const res = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setAuthError(data.message || "การเข้าสู่ระบบไม่สำเร็จ");
+        setIsLoggingIn(false);
+        return false;
+      }
+
+      if (data.token) {
+        localStorage.setItem("auth_token", data.token);
+      }
+      if (data.user) {
+        setUser(data.user);
+      }
+      setToast("เข้าสู่ระบบเรียบร้อยแล้ว");
+      setIsLoggingIn(false);
+      return true;
+    } catch (err) {
+      console.error("Login error:", err);
+      setAuthError("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาลองใหม่อีกครั้ง");
+      setIsLoggingIn(false);
+      return false;
+    }
+  };
+
   // 3. ฟังก์ชันออกจากระบบ
   const logout = () => {
     localStorage.removeItem("auth_token");
@@ -101,9 +138,11 @@ export function AuthProvider({ children }) {
         authLoading,
         isLoggingIn,
         authError,
+        setAuthError,
         toast,
         setToast,
         loginWithMicrosoft,
+        loginWithEmail,
         logout,
         token: localStorage.getItem("auth_token"),
       }}

@@ -2,7 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const db = require("./db");
 const authRoutes = require("./authRoutes");
-const projectRoutes = require("./projectRoutes");
 require("dotenv").config();
 
 const app = express();
@@ -12,9 +11,6 @@ app.use(express.json());
 
 // เส้นทางสำหรับ Authentication (Microsoft Login & User Management)
 app.use("/api/auth", authRoutes);
-
-// เส้นทางสำหรับโครงการวิจัยร่วม (Collaborative Research Projects)
-app.use("/api/projects", projectRoutes);
 
 
 /* ==========================================
@@ -95,11 +91,23 @@ function formatEntry(row) {
 
   return {
     id: row.id,
+    title: row.title || "",
+    authors: row.authors || "",
     author: row.author,
+    authorName: row.author_name || "",
+    affiliations: row.affiliations || "",
+    correspondingAuthor: row.corresponding_author || "",
+    publicationDate: row.publication_date || row.date || "",
+    doi: row.doi || "",
+    journal: row.journal || "",
+    volume: row.volume || "",
+    issue: row.issue || "",
+    abstract: row.abstract || "",
+    keywords: row.keywords || "",
     type: row.type,
     db: row.db,
     proportion: Number(row.proportion),
-    date: row.date,
+    date: row.publication_date || row.date,
     code: row.code,
     baseHours: Number(row.base_hours),
     hours: Number(row.base_hours),
@@ -117,7 +125,7 @@ function formatEntry(row) {
 
 // 1. API สำหรับคำนวณผลลัพธ์ (Live Preview)
 app.post("/api/calculate", (req, res) => {
-  const { author, type, db: selectedDb, proportion, date } = req.body;
+  const { author, type, db: selectedDb, proportion, date, publicationDate } = req.body;
   const lookup = LOOKUP_TABLE.find((r) => r.type === type && r.db === selectedDb);
   
   if (!lookup) {
@@ -125,7 +133,7 @@ app.post("/api/calculate", (req, res) => {
   }
 
   const actualHours = Math.round(((Number(proportion) || 0) * lookup.hours) / 100 * 100) / 100;
-  const dateInfo = computeDateInfo(date);
+  const dateInfo = computeDateInfo(publicationDate || date);
   const faculty = calculateFacultyFunding(type, author, lookup.faculty);
 
   res.json({ success: true, data: { ...lookup, faculty, actualHours, dateInfo } });
@@ -147,7 +155,19 @@ app.post("/api/entries", async (req, res) => {
   try {
     const id = req.body.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const {
+      title,
+      authors,
       author,
+      authorName,
+      affiliations,
+      correspondingAuthor,
+      publicationDate,
+      doi,
+      journal,
+      volume,
+      issue,
+      abstract,
+      keywords,
       type,
       db: selectedDb,
       proportion,
@@ -162,20 +182,36 @@ app.post("/api/entries", async (req, res) => {
       dateInfo
     } = req.body;
 
+    const pubDate = publicationDate || date || null;
+
     const sql = `
       INSERT INTO entries (
-        id, author, type, db, proportion, date, code,
+        id, title, authors, author, author_name, affiliations, corresponding_author,
+        publication_date, doi, journal, volume, issue, abstract, keywords,
+        type, db, proportion, date, code,
         base_hours, quality, actual_hours, faculty, faculty_note, uni, date_info
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     await db.query(sql, [
       id,
+      title || null,
+      authors || null,
       author || null,
+      authorName || null,
+      affiliations || null,
+      correspondingAuthor || null,
+      pubDate,
+      doi || null,
+      journal || null,
+      volume || null,
+      issue || null,
+      abstract || null,
+      keywords || null,
       type || "",
       selectedDb || "",
       proportion !== undefined ? Number(proportion) : 100,
-      date || null,
+      pubDate,
       code || "",
       baseHours !== undefined ? Number(baseHours) : 0,
       quality !== undefined ? Number(quality) : 0,

@@ -1,6 +1,7 @@
 
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 const db = require('./db');
 const { JWT_SECRET } = require('./authMiddleware');
 require('dotenv').config();
@@ -165,5 +166,112 @@ exports.getPrograms = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 7. ล็อกอินด้วย Email + Password (เฉพาะ @up.ac.th เท่านั้น)
+exports.loginWithEmail = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'กรุณากรอกอีเมลและรหัสผ่าน' });
+    }
+
+    // ตรวจสอบ domain อีเมล
+    if (!email.toLowerCase().endsWith('@up.ac.th')) {
+      return res.status(403).json({ success: false, message: 'อนุญาตเฉพาะอีเมลของมหาวิทยาลัยพะเยา (@up.ac.th) เท่านั้น' });
+    }
+
+    // ค้นหาผู้ใช้จากฐานข้อมูล
+    const [users] = await db.query(
+      `SELECT u.id, u.email, u.full_name, u.role, u.program_id, u.password_hash, p.name AS program_name
+       FROM users u
+       LEFT JOIN programs p ON u.program_id = p.id
+       WHERE u.email = ?`,
+      [email.toLowerCase()]
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({ success: false, message: 'ไม่พบบัญชีผู้ใช้นี้ในระบบ' });
+    }
+
+    const user = users[0];
+
+    if (!user.password_hash) {
+      return res.status(401).json({ success: false, message: 'บัญชีนี้ยังไม่ได้ตั้งรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ' });
+    }
+
+    // ตรวจสอบรหัสผ่าน
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'รหัสผ่านไม่ถูกต้อง' });
+    }
+
+    // ออก JWT Token
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        role: user.role,
+        program_id: user.program_id,
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        role: user.role,
+        program_id: user.program_id,
+        program_name: user.program_name,
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในระบบ' });
+  }
+};
+
+// 8. สร้างผู้ใช้ใหม่พร้อมรหัสผ่าน (เฉพาะ Admin เท่านั้น)
+exports.registerUser = async (req, res) => {
+  try {
+    const { email, full_name, password, role, program_id } = req.body;
+
+    if (!email || !full_name || !password) {
+      return res.status(400).json({ success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน (อีเมล, ชื่อ, รหัสผ่าน)' });
+    }
+
+    if (!email.toLowerCase().endsWith('@up.ac.th')) {
+      return res.status(403).json({ success: false, message: 'อนุญาตเฉพาะอีเมล @up.ac.th เท่านั้น' });
+    }
+
+    // ตรวจสอบว่ามีผู้ใช้อยู่แล้วหรือไม่
+    const [existing] = await db.query('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (existing.length > 0) {
+      return res.status(409).json({ success: false, message: 'อีเมลนี้มีในระบบแล้ว' });
+    }
+
+    const password_hash = await bcrypt.hash(password, 12);
+
+    const [result] = await db.query(
+      'INSERT INTO users (email, full_name, role, program_id, password_hash) VALUES (?, ?, ?, ?, ?)',
+      [email.toLowerCase(), full_name, role || 'user', program_id || null, password_hash]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'สร้างผู้ใช้เรียบร้อยแล้ว',
+      userId: result.insertId,
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในระบบ' });
   }
 };
